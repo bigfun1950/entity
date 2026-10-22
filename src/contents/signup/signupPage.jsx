@@ -47,21 +47,38 @@ export default function SignupPageContents() {
 	};
 
 	const handleSubmit = async (e) => {
-		setLoading(true);
 		e.preventDefault();
+		setLoading(true);
 
-		await toast.promise(
-			(async () => {
-				const captchaToken = await recaptchaRef.current.executeAsync();
-				recaptchaRef.current.reset();
-				const res = await fetch("/api/users/create", {
+		try {
+			await toast.promise(
+				(async () => {
+					if (!recaptchaRef.current) {
+						throw new Error("reCAPTCHA is still loading. Please try again.");
+					}
+
+					let timeoutId;
+					const captchaToken = await Promise.race([
+						recaptchaRef.current.executeAsync(),
+						new Promise((_, reject) => {
+							timeoutId = setTimeout(() => {
+								reject(
+									new Error(
+										"reCAPTCHA timed out. Disable browser shields for this site and try again."
+									)
+								);
+							}, 15000);
+						}),
+					]);
+					clearTimeout(timeoutId);
+					recaptchaRef.current.reset();
+					const res = await fetch("/api/users/create", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ ...form, captcha: captchaToken }),
 				});
 
 				const data = await res.json();
-				setLoading(false);
 
 				if (!res.ok) {
 					let newErrors = {};
@@ -90,13 +107,18 @@ export default function SignupPageContents() {
 				setErrors({});
 				Goto("/login");
 				return data.message || "Account created successfully!";
-			})(),
-			{
-				loading: "Creating your account...",
-				success: (msg) => msg,
-				error: (err) => err.message || "Something went wrong",
-			}
-		);
+				})(),
+				{
+					loading: "Creating your account...",
+					success: (msg) => msg,
+					error: (err) => err.message || "Something went wrong",
+				}
+			);
+		} catch {
+			// toast.promise already displays the error to the user.
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	return (
